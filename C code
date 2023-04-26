@@ -1,0 +1,283 @@
+//#define F_CPU 16000000UL
+#define LCD PORTB
+#define EN 7
+#define RS 5
+#define RW 6
+#define LCD_Data_Dir DDRB		/* Define LCD data port direction */
+#define LCD_Command_Dir DDRC		/* Define LCD command port direction register */
+#define LCD_Data_Port PORTB		/* Define LCD data port */
+#define LCD_Command_Port PORTC	
+#include <util/delay.h>
+#include <inttypes.h>
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
+
+// GLOBAL VARIABLES
+
+  unsigned char data;
+  int flag = 0;
+  int clr=0;
+  int lcd=0;
+   
+   
+                                                            /************************************************************************************/
+							    
+// Functions
+
+// COMMANDS OF LCD ( CURSOR & CLEAR )
+void lcdcmd(unsigned char cmd)
+{
+	PORTD  &=~(1<<RS);
+	PORTD  &=~(1<<RW);
+	LCD =cmd & 0xF0;
+	PORTD   |=   (1<<EN);
+   
+	_delay_ms(1);
+	PORTD &=~(1<<EN);
+
+	LCD = cmd<<4;
+	PORTD |= (1<<EN);
+	_delay_ms(1);
+	PORTD   &=~ (1<<EN);
+
+}
+
+																       /**********************/
+// LCD DATA 
+
+void lcddata(unsigned char data)
+{
+   
+   // RS ----> REGISTER SELECTION 
+   
+	PORTD  |= (1<<RS);       // DISPLAY DATA
+   
+   // RW----> READ & WRITE SELECTION
+   
+	PORTD  &=~ (1<<RW);  // READ OPERATION 
+	LCD = data & 0xF0;
+   
+   // EN ----> ENABLE SIGNAL 
+	PORTD  |=  (1<<EN);      // ALLOW TO READ DATA
+	_delay_ms(1);
+	PORTD  &=~ (1<<EN);   
+	LCD = data <<4;              // MOVE DATA FROM PIN4 TO LCD
+	PORTD  |= (1<<EN);       // ALLOW TO READ DATA
+	_delay_ms(1);
+	PORTD  &=~ (1<<EN);   
+}
+
+																       /**********************/
+// LCD INITIOLIZATION
+
+void lcd_init()
+{
+	DDRB = 0XFF;
+	PORTD  &=~ (1<<EN);
+   
+/*choose 4-bit mode*/
+   
+	lcdcmd(0x33);                  // function set 1
+	lcdcmd(0x32);			// function set 2
+
+	lcdcmd(0x28); 		// LCD_4Bit_Mode_2_Line_5X8	
+	lcdcmd(0x0E);		// CMD_Display_Cursor_ON_Blink_OFF
+	lcdcmd(0x01);			// CMD_Clear_Display
+	_delay_ms(2);
+
+}
+
+																       /**********************/
+
+// PRINT DATA ON LCD CHAR BY CHAR 
+
+void lcd_print(char*str)
+{
+	unsigned char i=0;
+   
+	while (str[i]!=0)                 // LOOP & ARRAY FOR PRINT CHAR
+{
+	lcddata(str[i]);
+	i++;
+}
+}
+
+																       /**********************/
+
+// ADC FOR TEMPRATURE
+
+void convertndisplay (unsigned char value)
+{
+	unsigned char x,d1,d2;
+	x=value/10;
+	d1=x;
+	d2=value%10;
+
+	lcdcmd(0x8D);
+	lcddata(d1+0x30);
+	lcddata(d2+0x30);
+
+}
+
+																       /**********************/
+// SEVEN SEGMENT DISPLAY
+void time(){
+   
+   // TO DISPLAY 1
+      PORTA=0b00000110;
+      PORTC=0b00000110;
+      _delay_ms(1000);
+
+      // TO DISPLAY 2
+	PORTA=0b01011011;
+	PORTC=0b01011011;
+	 _delay_ms(1000);
+   
+      // TO DISPLAY 3
+	PORTA=0b01001111;
+   	PORTC=0b01001111;
+	_delay_ms(1000);
+  
+   // TO DISPLAY 4
+	PORTA=0b01100110;
+   	PORTC=0b01100110;
+
+	_delay_ms(1000);
+
+// TO RESET SEVEN SEGMENT
+	PORTA=0b00000000;
+	PORTC=0b00000000;
+
+   
+   }
+
+
+//
+
+int main()
+{
+ // TO MAKE PORT I/O OR O/P
+      DDRD=0XFB;
+      DDRC=0XFF;
+   
+ //enable pull-up
+      PORTD |= (1<<PD2);      
+   
+//enable external interrupt 0   
+      GICR |= (1<<INT0);	
+   
+ //enable global interrupt
+      sei();		
+   
+   lcd_init();
+
+
+
+
+	DDRA  &=~(1<<7);
+	ADCSRA = 0x87;
+	ADMUX = 0xE0;
+
+
+while(1)
+{       
+     // FOR RED LIGHT
+clr=0;
+   
+   // LCD PRINT DATA
+         lcdcmd(0x01);                                                 // CMD_Clear_Display
+	lcd_print ("Temp(C)=");
+        lcdcmd(0x80 + 0x40 + 0);                              // 80 ----> DDRAM_CMD_OFFSET          /.  40 ----> CGRAM_CMD_OFFSET   
+	lcd_print (" PROF . Assem  ");
+        lcdcmd(0x80 + 0x40 + 8);
+
+   			ADCSRA  |= (1<<ADSC);
+				while ((ADCSRA&(1<<ADIF))==0);
+				data=ADCH;
+		convertndisplay(data);
+				
+   	PORTD=0b01000000;       				// TURN ON RED LIGHT ON TRAFFIC 1
+   	PORTB=0b11101000;					 // TURN ON GREEN LIGHT ON TRAFFIC 2
+				
+	time();								// SEVEN SEGMENT COUNTER	
+  
+   // FOR YELLOW LIGHT		
+clr=1;
+				
+   if (flag==0){								// CHECK IF INTERRUPT ACCURE OR NOT
+         	lcdcmd(0x01);						// CMD_Clear_Display
+               	lcdcmd(0x03);						// CMD RETURN CURSOR TO FIRST BIT OF LINE
+
+                lcd_print ("    WELCOME ");
+
+	       lcdcmd(0x80 + 0x40 + 8);
+	       PORTD=0b00010000;				// TURN ON YELLOW LIGHT ON TRAFFIC 1
+	       PORTB=0b11100001;				// TURN ON YELLOW LIGHT ON TRAFFIC 2
+	       time();							// SEVEN SEGMENT COUNTER
+   }else  									
+   flag=0;									// RESET FOR FLAG 			
+
+    // FOR GREEN LIGHT		
+   clr=2;
+;
+   if(flag==0){								// CHECK IF INTERRUPT ACCURE OR NOT
+               	lcdcmd(0x01);						// CMD_Clear_Display
+         	lcdcmd(0x03);						// CMD RETURN CURSOR TO FIRST BIT OF LINE
+      
+		lcd_print ("        TO");
+      
+		lcdcmd(0x80 + 0x40 + 8);
+	       PORTD=0b00001000;				// TURN ON GREEN LIGHT ON TRAFFIC 1
+	       PORTB=0b11100010;				// TURN ON RED LIGHT ON TRAFFIC 2
+
+	       time();							// SEVEN SEGMENT COUNTER
+   }else
+   flag=0;									// RESET FOR FLAG 	
+   
+     // FOR YELLOW LIGHT		
+ clr=3;
+
+if (flag==0){								// CHECK IF INTERRUPT ACCURE OR NOT
+	       clr=3;
+	       lcdcmd(0x01);						// CMD_Clear_Display
+	       lcdcmd(0x03);						// CMD RETURN CURSOR TO FIRST BIT OF LINE
+
+	       lcd_print ("MODERN STREET ");
+   
+	       lcdcmd(0x80 + 0x40 + 8);
+											
+	       PORTD=0b00010000;				// TURN ON YELLOW LIGHT ON TRAFFIC 1
+	       PORTB=0b11100001;				// TURN ON YELLOW LIGHT ON TRAFFIC 2
+
+	       time();							// SEVEN SEGMENT COUNTER
+   }else  
+   flag=0;									// RESET FOR FLAG 	
+
+}
+}
+/*
+ISR(INT0_vect){
+ flag=1;									// SET FLAG
+   
+if(  clr!=0){								// INTERRUPT DON'T USE IN RED LIGHT 
+		  if(clr==1 || clr==3){				// FOR YELLOW LIGHT
+		    
+				    PORTD=0b01000000;	// TURN ON RED LIGHT ON TRAFFIC 1
+				    time();					// SEVEN SEGMENT COUNTER
+				    PORTD=0b00010000;   	// TURN ON YELLOW LIGHT ON TRAFFIC 1
+				    time();					// SEVEN SEGMENT COUNTER
+			      } 		
+		  else if (clr==2){					// FOR GREEN LIGHT
+      				   PORTD=0b00010000;	// TURN ON YELLOW LIGHT ON TRAFFIC 1
+				   time();					// SEVEN SEGMENT COUNTER
+   				   PORTD=0b01000000;	// TURN ON RED LIGHT ON TRAFFIC 1
+				   time();					// SEVEN SEGMENT COUNTER
+			   }
+				       
+	       }
+	       
+}
+
+
+*/
